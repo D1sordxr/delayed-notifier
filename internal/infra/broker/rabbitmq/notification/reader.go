@@ -40,7 +40,7 @@ func NewReader(
 	}
 
 	consumerConfig := rabbitmq.NewConsumerConfig("notifications_queue")
-	consumerConfig.AutoAck = true
+	consumerConfig.AutoAck = false
 
 	consumer := rabbitmq.NewConsumer(channel, consumerConfig)
 

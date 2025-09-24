@@ -9,6 +9,13 @@ type Publisher interface {
 	Publish(ctx context.Context, n *model.Notification) error
 }
 
+type Consumer interface {
+	StartConsuming(
+		ctx context.Context,
+		handler func(ctx context.Context, m *model.Notification) error,
+	) error
+}
+
 type MessagePipe interface {
 	GetMessageChan() <-chan []byte
 }

@@ -1,7 +1,13 @@
 package vo
 
 const (
-	BrokerExchangeNotification = "notification"
+	NotificationsQueue = "notifications.queue.process"
+	WaitQueue          = "wait.queue.delay"
+	RetryQueue         = "retry.queue.delay"
 
-	NotificationQueue = "notification_queue"
+	WaitExchange          = "wait.exchange"
+	RetryExchange         = "retry.exchange"
+	NotificationsExchange = "notifications.exchange"
+
+	Direct = "direct"
 )

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/rs/zerolog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,8 +29,7 @@ func main() {
 
 	cfg := config.NewConfig()
 
-	zlog.Init()
-	log := logger.New(zlog.Logger)
+	log := logger.New(defaultLogger)
 
 	storageConn, err := dbpg.New(cfg.Storage.ConnectionString(), nil, nil)
 	if err != nil {
@@ -62,4 +62,11 @@ func main() {
 		httpServer,
 	)
 	app.Run(ctx)
+}
+
+var defaultLogger zerolog.Logger
+
+func init() {
+	zlog.Init()
+	defaultLogger = zlog.Logger
 }
