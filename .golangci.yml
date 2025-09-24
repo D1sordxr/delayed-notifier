@@ -1,0 +1,22 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - gosimple
+    - unused
+    - ineffassign
+    - gocyclo
+    - typecheck
+    - asasalint
+    - bodyclose
+
+issues:
+  max-issues-per-linter: 100
+  max-same-issues: 5
+
+#version: latest

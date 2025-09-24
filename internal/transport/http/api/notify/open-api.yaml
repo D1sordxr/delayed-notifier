@@ -1,0 +1,254 @@
+openapi: "3.0.0"
+info:
+  title: "Notify API"
+  version: "0.0.1"
+  description: "API Specification for Notification Management"
+
+paths:
+  /notify:
+    post:
+      summary: "Create new notification"
+      description: "Create new notification"
+      tags:
+        - Notifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNotificationRequest"
+      responses:
+        '201':
+          description: "Notification created successfully"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationResponse"
+        '400':
+          description: "Bad request"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /notify/{id}:
+    get:
+      summary: "Get notification by ID"
+      description: "Retrieve a specific notification by its ID"
+      tags:
+        - Notifications
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: string
+          description: "Notification ID (UUID)"
+      responses:
+        '200':
+          description: "Notification retrieved successfully"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationResponse"
+        '404':
+          description: "Notification not found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      summary: "Cancel notification"
+      description: "Cancel a notification by ID (soft delete)"
+      tags:
+        - Notifications
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: string
+          description: "Notification ID (UUID)"
+      responses:
+        '200':
+          description: "Notification cancelled successfully"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        '404':
+          description: "Notification not found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    CreateNotificationRequest:
+      type: object
+      required:
+        - author_id
+        - subject
+        - message
+        - channel
+        - scheduled_at
+      properties:
+        author_id:
+          type: string
+          example: "user-12345"
+          description: "User identifier (author)"
+        subject:
+          type: string
+          example: "Appointment Reminder"
+          description: "Notification subject"
+        message:
+          type: string
+          example: "Your appointment is scheduled for tomorrow at 10:00 AM"
+          description: "Notification message content"
+        channel:
+          type: string
+          enum: [email, telegram, sms]
+          example: "email"
+          description: "Notification delivery channel"
+        email_to:
+          type: string
+          format: string
+          example: "user@example.com"
+          description: "Recipient email (required for email channel)"
+        telegram_id:
+          type: integer
+          format: int64
+          example: 123456789
+          description: "Recipient Telegram chat ID (required for telegram channel)"
+        sms_to:
+          type: string
+          example: "+1234567890"
+          description: "Recipient phone number (required for SMS channel)"
+        scheduled_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:00:00Z"
+          description: "Scheduled delivery time in ISO 8601 format"
+
+    NotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: string
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          description: "Notification identifier"
+        subject:
+          type: string
+          example: "Appointment Reminder"
+          description: "Notification subject"
+        message:
+          type: string
+          example: "Your appointment is scheduled for tomorrow at 10:00 AM"
+          description: "Notification message content"
+        author_id:
+          type: string
+          nullable: true
+          example: "user-12345"
+          description: "User identifier (author), can be null"
+        email_to:
+          type: string
+          nullable: true
+          format: string
+          example: "user@example.com"
+          description: "Recipient email (for email channel)"
+        telegram_chat_id:
+          type: integer
+          format: int64
+          nullable: true
+          example: 123456789
+          description: "Recipient Telegram chat ID (for telegram channel)"
+        sms_to:
+          type: string
+          nullable: true
+          example: "+1234567890"
+          description: "Recipient phone number (for SMS channel)"
+        channel:
+          type: string
+          enum: [email, telegram, sms]
+          example: "email"
+          description: "Notification delivery channel"
+        status:
+          type: string
+          enum: [pending, sent, failed, declined]
+          example: "pending"
+          description: "Notification status"
+        attempts:
+          type: integer
+          format: int16
+          example: 0
+          description: "Number of delivery attempts"
+        scheduled_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:00:00Z"
+          description: "Scheduled delivery time"
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2024-01-15T10:00:05Z"
+          description: "Actual sent time (null if not sent yet)"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-10T14:30:00Z"
+          description: "Creation timestamp"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-01-10T14:30:00Z"
+          description: "Last update timestamp"
+
+    SuccessResponse:
+      type: object
+      required:
+        - result
+      properties:
+        result:
+          type: string
+          example: "Success"
+          description: "Success description"
+        details:
+          type: object
+          description: "Additional success details"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: "Notification not found"
+          description: "Error message description"
+        details:
+          type: object
+          description: "Additional error details"

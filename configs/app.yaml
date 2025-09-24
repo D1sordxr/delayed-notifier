@@ -1,0 +1,19 @@
+redis:
+  client_address: "redis:6379"
+  password: "delayed-notifier-password"
+
+server:
+  address: "0.0.0.0"
+  port: "8080"
+  timeout: "30s"
+  idle_timeout: "120s"
+  cors: true
+  allow_origins:
+    - "http://localhost:80"
+    - "http://localhost:88"
+    - "http://ui:80"
+    - "http://ui:88"
+
+broker:
+  host: "rabbitmq"
+  port: "5672"
