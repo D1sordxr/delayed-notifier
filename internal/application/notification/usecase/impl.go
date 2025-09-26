@@ -137,8 +137,11 @@ func (uc *UseCase) Read(ctx context.Context, id string) (*model.Notification, er
 	}
 
 	go func() {
-		if err = uc.cs.Create(ctx, notification); err != nil {
-			uc.log.Warn("Failed to cache notification", logFields("error", err.Error())...)
+		cacheCtx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
+
+		if err = uc.cs.Create(cacheCtx, notification); err != nil {
+			uc.log.Warn("Error saving notification to cache", logFields("error", err.Error())...)
 		}
 	}()
 
@@ -159,6 +162,15 @@ func (uc *UseCase) Delete(ctx context.Context, id string) error {
 		uc.log.Error("Failed to cancel notification", logFields("error", err.Error())...)
 		return fmt.Errorf("%s: %w", op, err)
 	}
+
+	go func() {
+		cacheCtx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
+
+		if err = uc.cs.Delete(cacheCtx, notificationID.String()); err != nil {
+			uc.log.Warn("Error deleting notification from cache", logFields("error", err.Error())...)
+		}
+	}()
 
 	uc.log.Info("Successfully canceled notification", logFields()...)
 

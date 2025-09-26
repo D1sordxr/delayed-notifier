@@ -89,6 +89,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     environment:
       CONFIG_PATH: ./configs/worker/prod.yaml
     restart: on-failure

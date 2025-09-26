@@ -21,10 +21,14 @@ func NewAdapter(client *redis.Client) *Adapter {
 func (s *Adapter) Create(ctx context.Context, notification *model.Notification) error {
 	const op = "redis.notification.Adapter.Create"
 
-	if err := s.client.Set(
+	data, err := json.Marshal(&notification)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if err = s.client.Set(
 		ctx,
 		vo.WithStorageKeyPrefix(notification.ID.String()),
-		notification,
+		data,
 	); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}

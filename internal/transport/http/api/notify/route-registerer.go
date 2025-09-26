@@ -23,7 +23,7 @@ func NewRouteRegisterer(
 }
 
 func (r *RouteRegisterer) RegisterRoutes(router *ginext.RouterGroup) {
-	notifyGroup := router.Group("/notify")
+	notifyGroup := router.RouterGroup
 	for _, mw := range r.middlewares {
 		notifyGroup.Use(mw)
 	}

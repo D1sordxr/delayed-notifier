@@ -87,15 +87,7 @@ func (r *Repository) ProcessPending(
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
-
-	var success bool
-	defer func() {
-		if !success {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				r.log.Error("failed to rollback transaction", "error", rollbackErr)
-			}
-		}
-	}()
+	defer func() { _ = tx.Rollback() }()
 
 	qtx := r.queries.WithTx(tx)
 	notifications, err := qtx.GetPendingNotificationsForUpdate(ctx, batchSize)
@@ -119,7 +111,7 @@ func (r *Repository) ProcessPending(
 		if err = processor(ctx, notification); err != nil {
 			r.log.Error("failed to process notification",
 				"notification_id", notification.ID,
-				"error", err,
+				"error", err.Error(),
 			)
 			failedIDs = append(failedIDs, notification.ID)
 		} else {
@@ -143,8 +135,6 @@ func (r *Repository) ProcessPending(
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("%s: commit transaction: %w", op, err)
 	}
-
-	success = true
 
 	r.log.Info("processed notifications batch",
 		"total", len(notifications),
