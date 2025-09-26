@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 	appPorts "wb-tech-l3/internal/domain/app/ports"
 	"wb-tech-l3/internal/domain/core/notification/model"
 	"wb-tech-l3/internal/domain/core/notification/params"
@@ -107,6 +108,14 @@ func (r *Repository) ProcessPending(
 
 	for _, n := range notifications {
 		notification := converters.ConvertGenToDomain(&n)
+
+		if notification.ScheduledAt.After(time.Now()) {
+			r.log.Debug("notification scheduled for future, skipping",
+				"notification_id", notification.ID,
+				"scheduled_at", notification.ScheduledAt,
+			)
+			continue
+		}
 
 		if err = processor(ctx, notification); err != nil {
 			r.log.Error("failed to process notification",

@@ -147,6 +147,7 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Notifi
 const getPendingNotificationsForUpdate = `-- name: GetPendingNotificationsForUpdate :many
 SELECT id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at FROM notifications
 WHERE status = 'pending'
+    AND scheduled_at <= NOW()  -- Только уведомления, время отправки которых наступило
 ORDER BY scheduled_at ASC
 FOR UPDATE SKIP LOCKED
 LIMIT $1

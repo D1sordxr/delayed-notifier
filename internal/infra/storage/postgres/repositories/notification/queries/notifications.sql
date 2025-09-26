@@ -51,6 +51,7 @@ WHERE
 -- Блокирует строки для обновления в транзакции
 SELECT * FROM notifications
 WHERE status = 'pending'
+    AND scheduled_at <= NOW()  -- Только уведомления, время отправки которых наступило
 ORDER BY scheduled_at ASC
 FOR UPDATE SKIP LOCKED
 LIMIT $1;
