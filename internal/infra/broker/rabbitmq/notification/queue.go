@@ -207,7 +207,7 @@ func (q *Queue) consume() (<-chan amqp091.Delivery, error) {
 	return q.ch.Consume(
 		vo.NotificationsQueue,
 		"",
-		true,
+		false,
 		false,
 		false,
 		false,

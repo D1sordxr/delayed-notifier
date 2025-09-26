@@ -11,6 +11,7 @@ import (
 type Processor struct {
 	log      appPorts.Logger
 	consumer ports.Consumer
+	cancel   context.CancelFunc
 }
 
 func NewProcessor(log appPorts.Logger, consumer ports.Consumer) *Processor {
@@ -21,8 +22,11 @@ func NewProcessor(log appPorts.Logger, consumer ports.Consumer) *Processor {
 }
 
 func (p *Processor) Start(ctx context.Context) error {
+	workerCtx, cancel := context.WithCancel(ctx)
+	p.cancel = cancel
+
 	return p.consumer.StartConsuming(
-		ctx,
+		workerCtx,
 		func(ctx context.Context, m *model.Notification) error {
 			switch m.Channel {
 			case vo.Email:
@@ -46,4 +50,7 @@ func (p *Processor) Start(ctx context.Context) error {
 	)
 }
 
-func (p *Processor) Stop(_ context.Context) error { return nil }
+func (p *Processor) Stop(_ context.Context) error {
+	p.cancel()
+	return nil
+}
