@@ -6,23 +6,20 @@ import (
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
-const basicConfigPath = "./configs/app.yaml"
+const basicApiConfigPath = "./configs/api/prod.yaml"
 
-var configPath string
-
-type Config struct {
+type ApiConfig struct {
 	Cache   Redis      `yaml:"cache"`
 	Storage Postgres   `yaml:"storage"`
-	Broker  RabbitMQ   `yaml:"broker"`
 	Server  HTTPServer `yaml:"server"`
 }
 
-func NewConfig() *Config {
-	var cfg Config
+func NewApiConfig() *ApiConfig {
+	var cfg ApiConfig
 
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
-		path = basicConfigPath
+		path = basicApiConfigPath
 	}
 
 	if err := cleanenv.ReadConfig(path, &cfg); err != nil {

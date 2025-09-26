@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/wb-go/wbf/dbpg"
 	appPorts "wb-tech-l3/internal/domain/app/ports"
 	"wb-tech-l3/internal/domain/core/notification/model"
 	"wb-tech-l3/internal/domain/core/notification/params"
 	"wb-tech-l3/internal/domain/core/notification/vo"
 	"wb-tech-l3/internal/infra/storage/postgres/repositories/notification/converters"
 	"wb-tech-l3/internal/infra/storage/postgres/repositories/notification/gen"
+
+	"github.com/google/uuid"
+	"github.com/wb-go/wbf/dbpg"
 )
 
 type Repository struct {

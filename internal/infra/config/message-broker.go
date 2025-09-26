@@ -11,6 +11,8 @@ type RabbitMQ struct {
 	Username string `yaml:"username" env:"RABBITMQ_USERNAME" env-default:"admin"`
 	Password string `yaml:"password" env:"RABBITMQ_PASSWORD" env-default:"delayed-notifier-password"`
 	VHost    string `yaml:"vhost" env:"RABBITMQ_VHOST" env-default:"/"`
+
+	DeclareExchange bool `yaml:"declare_exchange" env:"RABBITMQ_DECLARE_EXCHANGE" env-default:"false"`
 }
 
 func (c *RabbitMQ) GetConnectionString() string {

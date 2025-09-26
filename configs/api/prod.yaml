@@ -1,4 +1,13 @@
-redis:
+storage:
+  host: "postgres"
+  port: 5432
+  database: "orders-db"
+  user: "postgres"
+  password: "postgres"
+  migrations: true
+  ssl_mode: "disable"
+
+cache:
   client_address: "redis:6379"
   password: "delayed-notifier-password"
 
@@ -13,7 +22,3 @@ server:
     - "http://localhost:88"
     - "http://ui:80"
     - "http://ui:88"
-
-broker:
-  host: "rabbitmq"
-  port: "5672"

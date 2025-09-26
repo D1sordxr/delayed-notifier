@@ -4,25 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rabbitmq/amqp091-go"
-	"github.com/wb-go/wbf/rabbitmq"
 	"strconv"
 	"time"
 	appPorts "wb-tech-l3/internal/domain/app/ports"
 	"wb-tech-l3/internal/domain/core/notification/model"
 	"wb-tech-l3/internal/domain/core/notification/vo"
+
+	"github.com/rabbitmq/amqp091-go"
+	"github.com/wb-go/wbf/rabbitmq"
 )
 
 type Queue struct {
-	log       appPorts.Logger
-	conn      *rabbitmq.Connection
-	ch        *rabbitmq.Channel
-	exchanges map[string]*rabbitmq.Exchange
+	log  appPorts.Logger
+	conn *rabbitmq.Connection
+	ch   *rabbitmq.Channel
 }
 
 func NewQueue(
 	log appPorts.Logger,
 	conn *rabbitmq.Connection,
+	declareExchange bool,
 ) (*Queue, error) {
 	const op = "broker.rabbitmq.NewQueue"
 
@@ -38,7 +39,7 @@ func NewQueue(
 		ch:   channel,
 	}
 
-	if err = queue.setup(); err != nil {
+	if err = queue.setup(declareExchange); err != nil {
 		log.Error("Failed to setup queue", "error", err.Error())
 		return nil, fmt.Errorf("%s: setup: %w", op, err)
 	}
@@ -46,7 +47,7 @@ func NewQueue(
 	return &queue, nil
 }
 
-func (q *Queue) setup() error {
+func (q *Queue) setup(declareExchange bool) error {
 	exchangesToDeclare := []struct {
 		name string
 		kind string
@@ -56,11 +57,21 @@ func (q *Queue) setup() error {
 		{vo.RetryExchange, vo.Direct},
 	}
 
-	exchanges := make(map[string]*rabbitmq.Exchange, 3)
-	for _, exInfo := range exchangesToDeclare {
-		exchanges[exInfo.name] = rabbitmq.NewExchange(exInfo.name, exInfo.kind)
+	if declareExchange {
+		for _, exchange := range exchangesToDeclare {
+			if err := q.ch.ExchangeDeclare(
+				exchange.name,
+				exchange.kind,
+				true,
+				false,
+				false,
+				false,
+				nil,
+			); err != nil {
+				return fmt.Errorf("failed to declare exchange %s: %w", exchange.name, err)
+			}
+		}
 	}
-	q.exchanges = exchanges
 
 	if _, err := q.ch.QueueDeclare(
 		vo.NotificationsQueue,
@@ -158,7 +169,7 @@ func (q *Queue) publish(ctx context.Context, n *model.Notification) error {
 		Expiration:   strconv.FormatInt(delay.Milliseconds(), 10),
 	}
 
-	return q.ch.PublishWithContext(ctx, vo.WaitExchange, "", false, false, msg)
+	return q.ch.PublishWithContext(ctx, vo.NotificationsExchange, "", false, false, msg)
 }
 
 func (q *Queue) publishRetry(ctx context.Context, n *model.Notification, retryDelay time.Duration) error {

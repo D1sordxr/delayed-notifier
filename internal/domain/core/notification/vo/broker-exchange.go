@@ -5,9 +5,9 @@ const (
 	WaitQueue          = "wait.queue.delay"
 	RetryQueue         = "retry.queue.delay"
 
+	NotificationsExchange = "notifications.exchange"
 	WaitExchange          = "wait.exchange"
 	RetryExchange         = "retry.exchange"
-	NotificationsExchange = "notifications.exchange"
 
 	Direct = "direct"
 )

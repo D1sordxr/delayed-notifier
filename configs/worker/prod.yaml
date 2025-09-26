@@ -1,0 +1,20 @@
+storage:
+  host: "postgres"
+  port: 5432
+  database: "orders-db"
+  user: "postgres"
+  password: "postgres"
+  migrations: true
+  ssl_mode: "disable"
+
+cache:
+  client_address: "redis:6379"
+  password: "delayed-notifier-password"
+
+broker:
+  host: "rabbitmq"
+  port: "5672"
+  username: "admin"
+  password: "delayed-notifier-password"
+  vhost: "/"
+  declare_exchange: true

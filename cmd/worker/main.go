@@ -2,69 +2,91 @@ package main
 
 import (
 	"context"
-	"github.com/wb-go/wbf/zlog"
-	"log/slog"
 	"os"
 	"os/signal"
 	"time"
 	"wb-tech-l3/internal/infra/logger"
+	"wb-tech-l3/internal/infra/storage/postgres"
 
-	"wb-tech-l3/internal/application/notification/usecase"
+	"github.com/rs/zerolog"
+
 	loadApp "wb-tech-l3/internal/infra/app"
-	rabbitAdapter "wb-tech-l3/internal/infra/broker/rabbitmq/notification"
-	"wb-tech-l3/internal/infra/cache/redis/notification"
 	"wb-tech-l3/internal/infra/config"
 	"wb-tech-l3/internal/infra/worker"
-	"wb-tech-l3/internal/transport/http"
-	"wb-tech-l3/internal/transport/http/api/notify"
-	httpHandler "wb-tech-l3/internal/transport/http/api/notify/handler"
+
+	rabbitAdapter "wb-tech-l3/internal/infra/broker/rabbitmq/notification"
+	"wb-tech-l3/internal/infra/cache/redis/notification"
+	notificationRepository "wb-tech-l3/internal/infra/storage/postgres/repositories/notification"
 	workerHandler "wb-tech-l3/internal/transport/rabbitmq/notification/handler"
 
+	"github.com/wb-go/wbf/dbpg"
 	"github.com/wb-go/wbf/rabbitmq"
 	"github.com/wb-go/wbf/redis"
+	"github.com/wb-go/wbf/zlog"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	cfg := config.NewConfig()
+	cfg := config.NewWorkerConfig()
 
-	zlog.Init()
-	log := logger.New(zlog.Logger)
+	log := logger.New(defaultLogger)
+	log.Debug("Config data", "config", cfg)
 
-	log.Debug(
-		"Attempting to connect to RabbitMQ",
-		"conn_str", cfg.Broker.GetConnectionString(),
-	)
+	storageConn, err := dbpg.New(cfg.Storage.ConnectionString(), nil, nil)
+	if err != nil {
+		log.Error("Failed to connect to database", "error", err.Error())
+		return
+	}
+	defer func() { _ = storageConn.Master.Close() }()
+	if err = postgres.SetupStorage(storageConn.Master, cfg.Storage); err != nil {
+		log.Error("Failed to setup storage", "error", err.Error())
+		return
+	}
+	notificationRepo := notificationRepository.NewRepository(log, storageConn)
+
+	cacheConn := redis.New(cfg.Cache.ClientAddress, cfg.Cache.Password, 1)
+	defer func() { _ = cacheConn.Close() }()
+	notificationCacheAdapter := notification.NewAdapter(cacheConn)
+
 	brokerConn, err := rabbitmq.Connect(cfg.Broker.GetConnectionString(), 3, time.Second*3)
 	if err != nil {
-		log.Error("Broker connection failure")
+		log.Error("Broker connection failure", "error", err.Error())
 	}
-	notificationSender, err := rabbitAdapter.NewSender(log, brokerConn)
-	if err != nil {
-		log.Error("Failed to create notification sender", "error", err.Error())
-	}
-	notificationReader, err := rabbitAdapter.NewReader(log, brokerConn)
-	if err != nil {
-		log.Error("Failed to create notification reader", "error", err.Error())
-	}
+	defer func() { _ = brokerConn.Close() }()
 
-	notificationProcessor := workerHandler.NewDefaultDelivery(
+	notificationQueue, err := rabbitAdapter.NewQueue(log, brokerConn, cfg.Broker.DeclareExchange)
+	if err != nil {
+		log.Error("RabbitMQ queue failure", "error", err.Error())
+		return
+	}
+	notificationProducer := rabbitAdapter.NewProducer(notificationQueue)
+	notificationConsumer := rabbitAdapter.NewConsumer(log, notificationQueue)
+
+	notificationWriter := workerHandler.NewNotificationWriter(
 		log,
-		notificationReader,
-		notificationCacheAdapter, // TODO another repo
+		notificationRepo,
+		notificationProducer,
+		notificationCacheAdapter,
 	)
+	notificationProcessor := workerHandler.NewProcessor(log, notificationConsumer)
 	notificationWorker := worker.NewWorker(
 		log,
 		notificationProcessor,
+		notificationWriter,
 	)
 
 	app := loadApp.NewApp(
 		log,
 		notificationWorker,
-		notificationReader,
-		notificationSender,
 	)
 	app.Run(ctx)
+}
+
+var defaultLogger zerolog.Logger
+
+func init() {
+	zlog.Init()
+	defaultLogger = zlog.Logger
 }

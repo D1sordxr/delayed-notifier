@@ -26,13 +26,13 @@ func (p *Processor) Start(ctx context.Context) error {
 		func(ctx context.Context, m *model.Notification) error {
 			switch m.Channel {
 			case vo.Email:
-				p.log.Info("email received")
+				p.log.Info("email received", "data", m)
 				// sending email logic
 			case vo.Telegram:
-				p.log.Info("telegram received")
+				p.log.Info("telegram received", "data", m)
 				// sending telegram logic
 			case vo.SMS:
-				p.log.Info("sms received")
+				p.log.Info("sms received", "data", m)
 				// sending sms logic
 			default:
 				p.log.Warn("Received message with invalid channel",
@@ -45,3 +45,5 @@ func (p *Processor) Start(ctx context.Context) error {
 		},
 	)
 }
+
+func (p *Processor) Stop(_ context.Context) error { return nil }

@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rabbitmq/amqp091-go"
 	appPorts "wb-tech-l3/internal/domain/app/ports"
 	"wb-tech-l3/internal/domain/core/notification/model"
 	"wb-tech-l3/pkg/logger"
+
+	"github.com/rabbitmq/amqp091-go"
 )
 
 type Consumer struct {

@@ -2,12 +2,13 @@ package handler
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"sync"
 	"time"
 	appPorts "wb-tech-l3/internal/domain/app/ports"
 	"wb-tech-l3/internal/domain/core/notification/model"
 	"wb-tech-l3/internal/domain/core/notification/ports"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -69,7 +70,8 @@ func (w *NotificationWriter) startChannelWorkers(ctx context.Context) {
 				}
 				if err := w.cacheStore.Create(ctx, notification); err != nil {
 					w.log.Warn("Failed to cache notification",
-						"id", notification.ID.String(), "error", err)
+						"id", notification.ID.String(), "error", err,
+					)
 				}
 			}
 		}
@@ -110,7 +112,9 @@ func (w *NotificationWriter) startProcessLoop(ctx context.Context) {
 }
 
 func (w *NotificationWriter) processBatch(ctx context.Context) {
-	err := w.processor.ProcessPending(ctx, batchSize,
+	err := w.processor.ProcessPending(
+		ctx,
+		batchSize,
 		func(ctx context.Context, notification *model.Notification) error {
 			if err := w.publisher.Publish(ctx, notification); err != nil {
 				w.log.Error("Failed to publish notification",
@@ -138,7 +142,7 @@ func (w *NotificationWriter) processBatch(ctx context.Context) {
 		})
 
 	if err != nil {
-		w.log.Error("Error processing pending notifications", "error", err)
+		w.log.Error("Error processing pending notifications", "error", err.Error())
 	}
 }
 
