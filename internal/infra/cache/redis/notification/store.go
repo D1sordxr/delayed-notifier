@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"wb-tech-l3/internal/domain/core/notification/model"
-	"wb-tech-l3/internal/domain/core/notification/vo"
+
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/vo"
 
 	"github.com/wb-go/wbf/redis"
 )

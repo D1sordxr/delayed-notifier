@@ -5,21 +5,21 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"wb-tech-l3/internal/infra/logger"
-	"wb-tech-l3/internal/infra/storage/postgres"
+
+	"github.com/D1sordxr/delayed-notifier/internal/infra/logger"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres"
+
+	loadApp "github.com/D1sordxr/delayed-notifier/internal/infra/app"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
+	"github.com/D1sordxr/delayed-notifier/internal/transport/http"
+
+	notificationUseCase "github.com/D1sordxr/delayed-notifier/internal/application/notification/usecase"
+	notificationCache "github.com/D1sordxr/delayed-notifier/internal/infra/cache/redis/notification"
+	notificationRepository "github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres/repositories/notification"
+	"github.com/D1sordxr/delayed-notifier/internal/transport/http/api/notify"
+	"github.com/D1sordxr/delayed-notifier/internal/transport/http/api/notify/handler"
 
 	"github.com/rs/zerolog"
-
-	loadApp "wb-tech-l3/internal/infra/app"
-	"wb-tech-l3/internal/infra/config"
-	"wb-tech-l3/internal/transport/http"
-
-	notificationUseCase "wb-tech-l3/internal/application/notification/usecase"
-	notificationCache "wb-tech-l3/internal/infra/cache/redis/notification"
-	notificationRepository "wb-tech-l3/internal/infra/storage/postgres/repositories/notification"
-	"wb-tech-l3/internal/transport/http/api/notify"
-	"wb-tech-l3/internal/transport/http/api/notify/handler"
-
 	"github.com/wb-go/wbf/dbpg"
 	"github.com/wb-go/wbf/redis"
 	"github.com/wb-go/wbf/zlog"

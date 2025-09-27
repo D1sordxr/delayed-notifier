@@ -2,7 +2,8 @@ package postgres
 
 import (
 	"database/sql"
-	"wb-tech-l3/internal/infra/config"
+
+	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
 
 	"github.com/pressly/goose/v3"
 )

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"wb-tech-l3/internal/domain/app/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
 
 	"golang.org/x/sync/errgroup"
 )

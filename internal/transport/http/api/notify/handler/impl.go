@@ -3,10 +3,11 @@ package handler
 import (
 	"context"
 	"fmt"
-	"wb-tech-l3/internal/application/notification/input"
-	"wb-tech-l3/internal/application/notification/port"
-	"wb-tech-l3/internal/domain/core/notification/model"
-	"wb-tech-l3/pkg/xstrings"
+
+	"github.com/D1sordxr/delayed-notifier/internal/application/notification/input"
+	"github.com/D1sordxr/delayed-notifier/internal/application/notification/port"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
+	"github.com/D1sordxr/delayed-notifier/pkg/xstrings"
 )
 
 type Handlers struct {

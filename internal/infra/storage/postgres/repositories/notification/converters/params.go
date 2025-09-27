@@ -1,9 +1,9 @@
 package converters
 
 import (
-	"wb-tech-l3/internal/domain/core/notification/params"
-	"wb-tech-l3/internal/infra/storage/postgres/repositories/notification/gen"
-	"wb-tech-l3/pkg/pgutil"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/params"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres/repositories/notification/gen"
+	"github.com/D1sordxr/delayed-notifier/pkg/pgutil"
 )
 
 func ConvertCreateParams(p params.CreateNotificationParams) gen.CreateNotificationParams {

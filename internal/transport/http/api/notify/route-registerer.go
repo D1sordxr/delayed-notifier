@@ -1,7 +1,7 @@
 package notify
 
 import (
-	"wb-tech-l3/internal/transport/http/api/notify/handler"
+	"github.com/D1sordxr/delayed-notifier/internal/transport/http/api/notify/handler"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wb-go/wbf/ginext"

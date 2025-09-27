@@ -4,9 +4,10 @@ import (
 	"context"
 	"sync"
 	"time"
-	appPorts "wb-tech-l3/internal/domain/app/ports"
-	"wb-tech-l3/internal/domain/core/notification/model"
-	"wb-tech-l3/internal/domain/core/notification/ports"
+
+	appPorts "github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/ports"
 
 	"github.com/google/uuid"
 )

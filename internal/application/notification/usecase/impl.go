@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"wb-tech-l3/internal/application/notification/input"
-	appPorts "wb-tech-l3/internal/domain/app/ports"
-	"wb-tech-l3/internal/domain/core/notification/model"
-	"wb-tech-l3/internal/domain/core/notification/params"
-	"wb-tech-l3/internal/domain/core/notification/ports"
-	"wb-tech-l3/internal/domain/core/notification/vo"
-	"wb-tech-l3/pkg/logger"
+
+	"github.com/D1sordxr/delayed-notifier/internal/application/notification/input"
+	appPorts "github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/params"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/vo"
+	"github.com/D1sordxr/delayed-notifier/pkg/logger"
 
 	"github.com/google/uuid"
 )

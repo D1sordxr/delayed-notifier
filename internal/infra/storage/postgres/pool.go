@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"wb-tech-l3/internal/infra/config"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"

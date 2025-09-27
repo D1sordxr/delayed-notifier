@@ -1,7 +1,7 @@
 package vo
 
 import (
-	"wb-tech-l3/internal/domain/core/notification/errorx"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/errorx"
 )
 
 type Status uint

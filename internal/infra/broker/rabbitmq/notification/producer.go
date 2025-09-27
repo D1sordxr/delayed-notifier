@@ -3,7 +3,8 @@ package rabbitmq
 import (
 	"context"
 	"time"
-	"wb-tech-l3/internal/domain/core/notification/model"
+
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
 )
 
 type Producer struct {

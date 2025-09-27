@@ -1,9 +1,9 @@
 package converters
 
 import (
-	"wb-tech-l3/internal/domain/core/notification/model"
-	"wb-tech-l3/internal/domain/core/notification/vo"
-	"wb-tech-l3/internal/infra/storage/postgres/repositories/notification/gen"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/vo"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres/repositories/notification/gen"
 )
 
 func ConvertGenToDomain(rawModel *gen.Notification) *model.Notification {

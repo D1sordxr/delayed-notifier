@@ -1,4 +1,4 @@
-module wb-tech-l3
+module github.com/D1sordxr/delayed-notifier
 
 go 1.25.1
 

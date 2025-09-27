@@ -5,9 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"time"
-	"wb-tech-l3/internal/domain/app/ports"
-	"wb-tech-l3/internal/infra/config"
-	"wb-tech-l3/internal/transport/http/middleware"
+
+	"github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
+	"github.com/D1sordxr/delayed-notifier/internal/transport/http/middleware"
 
 	"github.com/wb-go/wbf/ginext"
 )

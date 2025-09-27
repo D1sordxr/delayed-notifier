@@ -5,20 +5,20 @@ import (
 	"os"
 	"os/signal"
 	"time"
-	"wb-tech-l3/internal/infra/logger"
-	"wb-tech-l3/internal/infra/storage/postgres"
+
+	"github.com/D1sordxr/delayed-notifier/internal/infra/logger"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres"
+
+	loadApp "github.com/D1sordxr/delayed-notifier/internal/infra/app"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/worker"
+
+	rabbitAdapter "github.com/D1sordxr/delayed-notifier/internal/infra/broker/rabbitmq/notification"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/cache/redis/notification"
+	notificationRepository "github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres/repositories/notification"
+	workerHandler "github.com/D1sordxr/delayed-notifier/internal/transport/rabbitmq/notification/handler"
 
 	"github.com/rs/zerolog"
-
-	loadApp "wb-tech-l3/internal/infra/app"
-	"wb-tech-l3/internal/infra/config"
-	"wb-tech-l3/internal/infra/worker"
-
-	rabbitAdapter "wb-tech-l3/internal/infra/broker/rabbitmq/notification"
-	"wb-tech-l3/internal/infra/cache/redis/notification"
-	notificationRepository "wb-tech-l3/internal/infra/storage/postgres/repositories/notification"
-	workerHandler "wb-tech-l3/internal/transport/rabbitmq/notification/handler"
-
 	"github.com/wb-go/wbf/dbpg"
 	"github.com/wb-go/wbf/rabbitmq"
 	"github.com/wb-go/wbf/redis"

@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
-	appPorts "wb-tech-l3/internal/domain/app/ports"
+
+	appPorts "github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
 
 	"github.com/wb-go/wbf/rabbitmq"
 )
