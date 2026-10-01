@@ -3,7 +3,7 @@ module github.com/D1sordxr/delayed-notifier
 go 1.27
 
 require (
-	github.com/D1sordxr/packages v0.3.0-new-features.4
+	github.com/D1sordxr/packages v0.3.0
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.6.0
