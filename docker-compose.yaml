@@ -76,6 +76,7 @@ services:
       start_period: 10s
 
   worker:
+    build: .
     image: delayed-notifier:local
     command: [ "/app/worker" ]
     container_name: delayed-notifier-worker

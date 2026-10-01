@@ -1,8 +1,6 @@
 github.com/BurntSushi/toml v1.2.1/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
 github.com/BurntSushi/toml v1.3.2 h1:o7IhLm0Msx3BaB+n3Ag7L8EVlByGnpq14C4YWiu/gL8=
 github.com/BurntSushi/toml v1.3.2/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
-github.com/D1sordxr/packages v0.3.0-new-features.3 h1:mTqPZe5Nxcbz+n5oDAjE3U6q10XWIUuUthJmJkNOqW4=
-github.com/D1sordxr/packages v0.3.0-new-features.3/go.mod h1:uVV7Ko7CKWXONFjwgvdT73Na25v++MvHRDqZT66aOO4=
 github.com/D1sordxr/packages v0.3.0-new-features.4 h1:3PR5Yd02bCEKhaysUHIX2T+oKGXy0uAT8wQV29Wls/w=
 github.com/D1sordxr/packages v0.3.0-new-features.4/go.mod h1:uVV7Ko7CKWXONFjwgvdT73Na25v++MvHRDqZT66aOO4=
 github.com/RaveNoX/go-jsoncommentstrip v1.0.0/go.mod h1:78ihd09MekBnJnxpICcwzCMzGrKSKYe4AqU6PDYYpjk=
