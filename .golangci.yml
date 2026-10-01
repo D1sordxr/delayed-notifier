@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -7,16 +9,14 @@ linters:
     - govet
     - staticcheck
     - errcheck
-    - gosimple
     - unused
     - ineffassign
     - gocyclo
-    - typecheck
     - asasalint
     - bodyclose
+  exclusions:
+    generated: lax
 
 issues:
   max-issues-per-linter: 100
   max-same-issues: 5
-
-#version: latest

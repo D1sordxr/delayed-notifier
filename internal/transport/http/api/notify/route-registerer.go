@@ -4,7 +4,6 @@ import (
 	"github.com/D1sordxr/delayed-notifier/internal/transport/http/api/notify/handler"
 
 	"github.com/gin-gonic/gin"
-	"github.com/wb-go/wbf/ginext"
 )
 
 type RouteRegisterer struct {
@@ -22,21 +21,11 @@ func NewRouteRegisterer(
 	}
 }
 
-func (r *RouteRegisterer) RegisterRoutes(router *ginext.RouterGroup) {
-	notifyGroup := router.RouterGroup
-	for _, mw := range r.middlewares {
-		notifyGroup.Use(mw)
-	}
-
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "OK"})
-	})
+func (r *RouteRegisterer) RegisterRoutes(router *gin.RouterGroup) {
+	router.Use(r.middlewares...)
 
 	handler.RegisterHandlers(
-		notifyGroup,
-		handler.NewStrictHandler(
-			r.handlers,
-			[]handler.StrictMiddlewareFunc{},
-		),
+		router,
+		handler.NewStrictHandler(r.handlers, nil),
 	)
 }

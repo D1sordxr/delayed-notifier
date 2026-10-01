@@ -5,7 +5,6 @@
 package gen
 
 import (
-	"database/sql"
 	"database/sql/driver"
 	"fmt"
 	"time"
@@ -104,15 +103,16 @@ type Notification struct {
 	ID             uuid.UUID          `json:"id"`
 	Subject        string             `json:"subject"`
 	Message        string             `json:"message"`
-	AuthorID       sql.NullString     `json:"author_id"`
-	EmailTo        sql.NullString     `json:"email_to"`
-	TelegramChatID sql.NullInt64      `json:"telegram_chat_id"`
-	SmsTo          sql.NullString     `json:"sms_to"`
+	AuthorID       *string            `json:"author_id"`
+	EmailTo        *string            `json:"email_to"`
+	TelegramChatID *int64             `json:"telegram_chat_id"`
+	SmsTo          *string            `json:"sms_to"`
 	Channel        ChannelType        `json:"channel"`
 	Status         NotificationStatus `json:"status"`
 	Attempts       int16              `json:"attempts"`
 	ScheduledAt    time.Time          `json:"scheduled_at"`
-	SentAt         sql.NullTime       `json:"sent_at"`
+	SentAt         *time.Time         `json:"sent_at"`
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
+	QueuedAt       *time.Time         `json:"queued_at"`
 }

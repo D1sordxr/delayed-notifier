@@ -5,6 +5,20 @@ info:
   description: "API Specification for Notification Management"
 
 paths:
+  /health:
+    get:
+      summary: "Health check"
+      description: "Returns 200 while the API is up"
+      tags:
+        - Health
+      responses:
+        '200':
+          description: "Service is healthy"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
   /notify:
     post:
       summary: "Create new notification"
@@ -58,6 +72,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationResponse"
+        '400':
+          description: "Invalid notification ID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '404':
           description: "Notification not found"
           content:
@@ -73,7 +93,7 @@ paths:
 
     delete:
       summary: "Cancel notification"
-      description: "Cancel a notification by ID (soft delete)"
+      description: "Cancel a pending notification by ID (soft delete). Cancelling an already cancelled notification succeeds."
       tags:
         - Notifications
       parameters:
@@ -91,8 +111,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+        '400':
+          description: "Invalid notification ID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         '404':
           description: "Notification not found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '409':
+          description: "Notification is already sent or failed and cannot be cancelled"
           content:
             application/json:
               schema:
@@ -239,6 +271,15 @@ components:
         details:
           type: object
           description: "Additional success details"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: "ok"
 
     ErrorResponse:
       type: object

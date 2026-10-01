@@ -6,75 +6,81 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/D1sordxr/delayed-notifier/internal/infra/logger"
-	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres"
-
-	loadApp "github.com/D1sordxr/delayed-notifier/internal/infra/app"
-	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
-	"github.com/D1sordxr/delayed-notifier/internal/transport/http"
-
 	notificationUseCase "github.com/D1sordxr/delayed-notifier/internal/application/notification/usecase"
 	notificationCache "github.com/D1sordxr/delayed-notifier/internal/infra/cache/redis/notification"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/logger"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres"
 	notificationRepository "github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres/repositories/notification"
+	"github.com/D1sordxr/delayed-notifier/internal/transport/http"
 	"github.com/D1sordxr/delayed-notifier/internal/transport/http/api/notify"
 	"github.com/D1sordxr/delayed-notifier/internal/transport/http/api/notify/handler"
 
-	"github.com/rs/zerolog"
-	"github.com/wb-go/wbf/dbpg"
-	"github.com/wb-go/wbf/redis"
-	"github.com/wb-go/wbf/zlog"
+	"github.com/D1sordxr/packages/app"
+	"github.com/D1sordxr/packages/httpserver"
+	pgPool "github.com/D1sordxr/packages/postgres"
+	exec "github.com/D1sordxr/packages/postgres/executor"
+	"github.com/D1sordxr/packages/redis"
 )
 
 func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	cfg := config.NewApiConfig()
+	log := logger.New(cfg.LogLevel)
 
-	log := logger.New(defaultLogger)
-	log.Debug("Config data", "config", cfg)
-
-	storageConn, err := dbpg.New(cfg.Storage.ConnectionString(), nil, nil)
+	pool, err := pgPool.NewPool(ctx, &cfg.Storage.Config)
 	if err != nil {
 		log.Error("Failed to connect to database", "error", err.Error())
-		return
+		return err
 	}
-	defer func() { _ = storageConn.Master.Close() }()
-	if err = postgres.SetupStorage(storageConn.Master, cfg.Storage); err != nil {
-		log.Error("Failed to setup storage", "error", err.Error())
-		return
-	}
-	notificationRepo := notificationRepository.NewRepository(log, storageConn)
+	poolComponent := pgPool.NewPoolComponent(pool, log, 0)
+	defer func() { _ = poolComponent.Shutdown(context.Background()) }()
 
-	cacheConn := redis.New(cfg.Cache.ClientAddress, cfg.Cache.Password, 1)
-	defer func() { _ = cacheConn.Close() }()
-	notificationCacheAdapter := notificationCache.NewAdapter(cacheConn)
+	if cfg.Storage.Migrations {
+		if err = postgres.Migrate(ctx, pool); err != nil {
+			log.Error("Failed to apply migrations", "error", err.Error())
+			return err
+		}
+	}
+	notificationRepo := notificationRepository.NewRepository(exec.NewExecutor(pool))
+
+	cacheClient, err := redis.NewClient(ctx, &cfg.Cache.Config)
+	if err != nil {
+		log.Error("Failed to connect to cache", "error", err.Error())
+		return err
+	}
+	cacheComponent := redis.NewClientComponent(cacheClient, log, 0)
+	defer func() { _ = cacheComponent.Shutdown(context.Background()) }()
+
+	cacheStore := notificationCache.NewStore(cacheClient, cfg.Cache.TTL)
+	cacheWriter := notificationCache.NewWriter(log, cacheStore, cfg.Cache.WriteBuffer, cfg.Cache.WriteWorkers)
 
 	notificationUC := notificationUseCase.NewUseCase(
 		log,
-		notificationCacheAdapter,
+		cacheStore,
+		cacheWriter,
 		notificationRepo,
 	)
 
-	notificationHandlers := handler.NewHandlers(notificationUC)
-	notificationRouteRegisterer := notify.NewRouteRegisterer(notificationHandlers)
-
-	httpServer := http.NewServer(
-		log,
+	httpServer := httpserver.New(cfg.Server.Config, http.NewHandler(
 		&cfg.Server,
-		notificationRouteRegisterer,
-	)
+		notify.NewRouteRegisterer(handler.NewHandlers(log, notificationUC)),
+	))
 
-	app := loadApp.NewApp(
-		log,
+	// Components stop in reverse order: the server stops taking requests
+	// first, the connections it uses are closed last.
+	return app.New(log,
+		poolComponent,
+		cacheComponent,
+		cacheWriter,
 		httpServer,
-	)
-	app.Run(ctx)
-}
-
-var defaultLogger zerolog.Logger
-
-func init() {
-	zlog.Init()
-	defaultLogger = zlog.Logger
+	).Run(ctx)
 }

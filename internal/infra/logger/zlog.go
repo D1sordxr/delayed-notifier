@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"os"
+
 	"github.com/rs/zerolog"
 )
 
@@ -8,8 +10,16 @@ type Logger struct {
 	logger zerolog.Logger
 }
 
-func New(zlog zerolog.Logger) *Logger {
-	return &Logger{logger: zlog}
+// New returns a JSON logger writing to stdout. An unknown level means info.
+func New(level string) *Logger {
+	lvl, err := zerolog.ParseLevel(level)
+	if err != nil || lvl == zerolog.NoLevel {
+		lvl = zerolog.InfoLevel
+	}
+
+	return &Logger{
+		logger: zerolog.New(os.Stdout).Level(lvl).With().Timestamp().Logger(),
+	}
 }
 
 func (l *Logger) Info(msg string, keysAndValues ...interface{}) {

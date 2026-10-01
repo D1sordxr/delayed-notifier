@@ -1,20 +1,42 @@
+log_level: info
+
 storage:
   host: "postgres"
   port: 5432
   database: "orders-db"
   user: "postgres"
   password: "postgres"
-  migrations: true
   ssl_mode: "disable"
+  migrations: true
 
 cache:
-  client_address: "redis:6379"
+  addr: "redis:6379"
   password: "delayed-notifier-password"
+  ttl: "10m"
+  write_buffer: 1024
+  write_workers: 2
 
 broker:
   host: "rabbitmq"
-  port: "5672"
+  port: 5672
   username: "admin"
   password: "delayed-notifier-password"
   vhost: "/"
-  declare_exchange: true
+  connect_attempts: 10
+  connect_backoff: "3s"
+
+# Polls the database for due notifications and hands them over to RabbitMQ.
+scheduler:
+  interval: "1s"
+  # Notifications due within lookahead are claimed early and wait in the
+  # wait queue (per-message TTL), so they are delivered on time.
+  lookahead: "1s"
+  batch_size: 100
+  # A queued notification still pending after this long is claimed again.
+  stale_after: "5m"
+
+# Consumes the notifications queue and delivers them.
+dispatcher:
+  prefetch: 10
+  max_attempts: 3
+  retry_delay: "30s"

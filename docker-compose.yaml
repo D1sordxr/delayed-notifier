@@ -37,27 +37,26 @@ services:
       start_period: 30s
 
   redis:
-    image: bitnami/redis:latest
+    image: redis:7-alpine
     container_name: delayed-notifier-redis
     restart: unless-stopped
+    command: [ "redis-server", "--requirepass", "delayed-notifier-password" ]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    environment:
-      - REDIS_PASSWORD=delayed-notifier-password
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "delayed-notifier-password", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: [ "CMD", "redis-cli", "-a", "delayed-notifier-password", "--no-auth-warning", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   api:
-    build:
-      context: .
-      target: builder
-    command: ["/app/api"]
+    build: .
+    image: delayed-notifier:local
+    command: [ "/app/api" ]
     container_name: delayed-notifier-api
+    restart: on-failure
     ports:
       - "8080:8080"
     depends_on:
@@ -71,17 +70,16 @@ services:
       - ./configs:/app/configs:ro
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health" ]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 10s
 
   worker:
-    build:
-      context: .
-      target: builder
+    image: delayed-notifier:local
     command: [ "/app/worker" ]
     container_name: delayed-notifier-worker
+    restart: on-failure
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,10 +88,11 @@ services:
       redis:
         condition: service_healthy
       api:
-        condition: service_healthy
+        condition: service_started
     environment:
       CONFIG_PATH: ./configs/worker/prod.yaml
-    restart: on-failure
+    volumes:
+      - ./configs:/app/configs:ro
 
 volumes:
   rabbitmq_data:

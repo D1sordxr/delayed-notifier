@@ -2,25 +2,16 @@ package ports
 
 import (
 	"context"
+	"time"
 
-	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
+	"github.com/google/uuid"
 )
 
+// Publisher hands notifications over to the dispatcher through the broker.
 type Publisher interface {
-	Publish(ctx context.Context, n *model.Notification) error
-}
-
-type Consumer interface {
-	StartConsuming(
-		ctx context.Context,
-		handler func(ctx context.Context, m *model.Notification) error,
-	) error
-}
-
-type MessagePipe interface {
-	GetMessageChan() <-chan []byte
-}
-
-type Sender interface {
-	PublishDelayed(notification model.Notification) error
+	// Publish delivers the notification to the dispatcher after delay
+	// (immediately when delay <= 0).
+	Publish(ctx context.Context, id uuid.UUID, delay time.Duration) error
+	// PublishRetry delivers the notification to the dispatcher after the retry delay.
+	PublishRetry(ctx context.Context, id uuid.UUID) error
 }

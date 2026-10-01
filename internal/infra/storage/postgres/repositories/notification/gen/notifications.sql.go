@@ -7,27 +7,26 @@ package gen
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 const cancelNotification = `-- name: CancelNotification :one
 UPDATE notifications
 SET
-    status = 'declined'  -- Меняем статус на отмененный
-WHERE
-    id = $1
-    RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at
+    status = 'declined',
+    updated_at = clock_timestamp()
+WHERE id = $1
+    AND status = 'pending'
+RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at
 `
 
-// Запрос выполняет "мягкое удаление" путем изменения статуса на 'declined'
-// Мы никогда не удаляем данные полностью, только меняем их состояние
-// Это обеспечивает аудит и историчность данных
+// "Мягкое удаление": отменить можно только еще не отправленное уведомление.
+// Если уведомление прямо сейчас отправляется, запрос дождется конца отправки
+// и не найдет строку, так как статус уже не 'pending'
 func (q *Queries) CancelNotification(ctx context.Context, id uuid.UUID) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, cancelNotification, id)
+	row := q.db.QueryRow(ctx, cancelNotification, id)
 	var i Notification
 	err := row.Scan(
 		&i.ID,
@@ -44,8 +43,64 @@ func (q *Queries) CancelNotification(ctx context.Context, id uuid.UUID) (Notific
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueuedAt,
 	)
 	return i, err
+}
+
+const claimDueNotifications = `-- name: ClaimDueNotifications :many
+SELECT id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at FROM notifications
+WHERE status = 'pending'
+    AND scheduled_at <= $1
+    AND (queued_at IS NULL OR queued_at < $2::timestamptz)
+ORDER BY scheduled_at
+LIMIT $3
+FOR UPDATE SKIP LOCKED
+`
+
+type ClaimDueNotificationsParams struct {
+	DueBefore   time.Time `json:"due_before"`
+	StaleBefore time.Time `json:"stale_before"`
+	BatchSize   int32     `json:"batch_size"`
+}
+
+// Забирает пачку уведомлений, время отправки которых наступает до due_before,
+// и которые еще не переданы в брокер (или переданы давно и застряли).
+// SKIP LOCKED позволяет нескольким воркерам работать параллельно без дублей
+func (q *Queries) ClaimDueNotifications(ctx context.Context, arg ClaimDueNotificationsParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, claimDueNotifications, arg.DueBefore, arg.StaleBefore, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notification
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.Subject,
+			&i.Message,
+			&i.AuthorID,
+			&i.EmailTo,
+			&i.TelegramChatID,
+			&i.SmsTo,
+			&i.Channel,
+			&i.Status,
+			&i.Attempts,
+			&i.ScheduledAt,
+			&i.SentAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.QueuedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createNotification = `-- name: CreateNotification :one
@@ -64,26 +119,25 @@ INSERT INTO notifications (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10
 )
-    RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at
+RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at
 `
 
 type CreateNotificationParams struct {
 	Subject        string             `json:"subject"`
 	Message        string             `json:"message"`
-	AuthorID       sql.NullString     `json:"author_id"`
-	EmailTo        sql.NullString     `json:"email_to"`
-	TelegramChatID sql.NullInt64      `json:"telegram_chat_id"`
-	SmsTo          sql.NullString     `json:"sms_to"`
+	AuthorID       *string            `json:"author_id"`
+	EmailTo        *string            `json:"email_to"`
+	TelegramChatID *int64             `json:"telegram_chat_id"`
+	SmsTo          *string            `json:"sms_to"`
 	Channel        ChannelType        `json:"channel"`
 	Status         NotificationStatus `json:"status"`
 	Attempts       int16              `json:"attempts"`
 	ScheduledAt    time.Time          `json:"scheduled_at"`
 }
 
-// Запрос создает новое уведомление в базе данных;
-// Возвращает созданную запись целиком
+// Создает новое уведомление; возвращает созданную запись целиком
 func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, createNotification,
+	row := q.db.QueryRow(ctx, createNotification,
 		arg.Subject,
 		arg.Message,
 		arg.AuthorID,
@@ -111,19 +165,19 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueuedAt,
 	)
 	return i, err
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at FROM notifications
+SELECT id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at FROM notifications
 WHERE id = $1
 `
 
-// Запрос получает одно уведомление по его UUID;
-// Используется для проверки статуса или деталей уведомления
+// Получает одно уведомление по его UUID
 func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, getNotificationByID, id)
+	row := q.db.QueryRow(ctx, getNotificationByID, id)
 	var i Notification
 	err := row.Scan(
 		&i.ID,
@@ -140,107 +194,55 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Notifi
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueuedAt,
 	)
 	return i, err
 }
 
-const getPendingNotificationsForUpdate = `-- name: GetPendingNotificationsForUpdate :many
-SELECT id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at FROM notifications
-WHERE status = 'pending'
-    AND scheduled_at <= NOW()  -- Только уведомления, время отправки которых наступило
-ORDER BY scheduled_at ASC
-FOR UPDATE SKIP LOCKED
-LIMIT $1
+const lockPendingNotification = `-- name: LockPendingNotification :one
+SELECT id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at FROM notifications
+WHERE id = $1
+    AND status = 'pending'
+FOR UPDATE
 `
 
-// Блокирует строки для обновления в транзакции
-func (q *Queries) GetPendingNotificationsForUpdate(ctx context.Context, limit int32) ([]Notification, error) {
-	rows, err := q.db.QueryContext(ctx, getPendingNotificationsForUpdate, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Notification
-	for rows.Next() {
-		var i Notification
-		if err := rows.Scan(
-			&i.ID,
-			&i.Subject,
-			&i.Message,
-			&i.AuthorID,
-			&i.EmailTo,
-			&i.TelegramChatID,
-			&i.SmsTo,
-			&i.Channel,
-			&i.Status,
-			&i.Attempts,
-			&i.ScheduledAt,
-			&i.SentAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+// Блокирует уведомление на время отправки. Если строку уже отправляет другой
+// обработчик, запрос ждет его и затем не находит строку (статус сменился)
+func (q *Queries) LockPendingNotification(ctx context.Context, id uuid.UUID) (Notification, error) {
+	row := q.db.QueryRow(ctx, lockPendingNotification, id)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.Subject,
+		&i.Message,
+		&i.AuthorID,
+		&i.EmailTo,
+		&i.TelegramChatID,
+		&i.SmsTo,
+		&i.Channel,
+		&i.Status,
+		&i.Attempts,
+		&i.ScheduledAt,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.QueuedAt,
+	)
+	return i, err
 }
 
-const setNotificationStatusFailedMany = `-- name: SetNotificationStatusFailedMany :exec
-UPDATE notifications
-SET status = 'failed'
-WHERE id = ANY($1::uuid[])
-`
-
-func (q *Queries) SetNotificationStatusFailedMany(ctx context.Context, ids []uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, setNotificationStatusFailedMany, pq.Array(ids))
-	return err
-}
-
-const setNotificationStatusSentMany = `-- name: SetNotificationStatusSentMany :exec
-UPDATE notifications
-SET status = 'sent'
-WHERE id = ANY($1::uuid[])
-`
-
-func (q *Queries) SetNotificationStatusSentMany(ctx context.Context, ids []uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, setNotificationStatusSentMany, pq.Array(ids))
-	return err
-}
-
-const updateNotificationStatus = `-- name: UpdateNotificationStatus :one
+const markNotificationFailed = `-- name: MarkNotificationFailed :one
 UPDATE notifications
 SET
-    status = $2,    -- Новый статус: sent, failed, etc.
-    attempts = $3,  -- Увеличиваем счетчик попыток
-    sent_at = $4    -- Время фактической отправки (если успешно)
-WHERE
-    id = $1
-    RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at
+    status = 'failed',
+    attempts = attempts + 1,
+    updated_at = clock_timestamp()
+WHERE id = $1
+RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at
 `
 
-type UpdateNotificationStatusParams struct {
-	ID       uuid.UUID          `json:"id"`
-	Status   NotificationStatus `json:"status"`
-	Attempts int16              `json:"attempts"`
-	SentAt   sql.NullTime       `json:"sent_at"`
-}
-
-// Запрос обновляет статус, счетчик попыток и время отправки уведомления;
-// Используется воркером после попытки отправки
-func (q *Queries) UpdateNotificationStatus(ctx context.Context, arg UpdateNotificationStatusParams) (Notification, error) {
-	row := q.db.QueryRowContext(ctx, updateNotificationStatus,
-		arg.ID,
-		arg.Status,
-		arg.Attempts,
-		arg.SentAt,
-	)
+func (q *Queries) MarkNotificationFailed(ctx context.Context, id uuid.UUID) (Notification, error) {
+	row := q.db.QueryRow(ctx, markNotificationFailed, id)
 	var i Notification
 	err := row.Scan(
 		&i.ID,
@@ -257,6 +259,88 @@ func (q *Queries) UpdateNotificationStatus(ctx context.Context, arg UpdateNotifi
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueuedAt,
 	)
 	return i, err
+}
+
+const markNotificationRetry = `-- name: MarkNotificationRetry :one
+UPDATE notifications
+SET
+    attempts = attempts + 1,
+    queued_at = clock_timestamp(),
+    updated_at = clock_timestamp()
+WHERE id = $1
+RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at
+`
+
+// Неудачная попытка, после которой будет повтор через retry-очередь
+func (q *Queries) MarkNotificationRetry(ctx context.Context, id uuid.UUID) (Notification, error) {
+	row := q.db.QueryRow(ctx, markNotificationRetry, id)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.Subject,
+		&i.Message,
+		&i.AuthorID,
+		&i.EmailTo,
+		&i.TelegramChatID,
+		&i.SmsTo,
+		&i.Channel,
+		&i.Status,
+		&i.Attempts,
+		&i.ScheduledAt,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.QueuedAt,
+	)
+	return i, err
+}
+
+const markNotificationSent = `-- name: MarkNotificationSent :one
+UPDATE notifications
+SET
+    status = 'sent',
+    attempts = attempts + 1,
+    sent_at = clock_timestamp(),
+    updated_at = clock_timestamp()
+WHERE id = $1
+RETURNING id, subject, message, author_id, email_to, telegram_chat_id, sms_to, channel, status, attempts, scheduled_at, sent_at, created_at, updated_at, queued_at
+`
+
+func (q *Queries) MarkNotificationSent(ctx context.Context, id uuid.UUID) (Notification, error) {
+	row := q.db.QueryRow(ctx, markNotificationSent, id)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.Subject,
+		&i.Message,
+		&i.AuthorID,
+		&i.EmailTo,
+		&i.TelegramChatID,
+		&i.SmsTo,
+		&i.Channel,
+		&i.Status,
+		&i.Attempts,
+		&i.ScheduledAt,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.QueuedAt,
+	)
+	return i, err
+}
+
+const markNotificationsQueued = `-- name: MarkNotificationsQueued :exec
+UPDATE notifications
+SET queued_at = clock_timestamp()
+WHERE id = ANY($1::uuid[])
+`
+
+// Отмечает уведомления как переданные в брокер.
+// updated_at не меняется: видимое состояние уведомления осталось прежним
+func (q *Queries) MarkNotificationsQueued(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markNotificationsQueued, ids)
+	return err
 }

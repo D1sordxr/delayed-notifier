@@ -3,10 +3,11 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"time"
+	"net/mail"
 
 	"github.com/D1sordxr/delayed-notifier/internal/application/notification/input"
 	appPorts "github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/errorx"
 	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
 	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/params"
 	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/ports"
@@ -17,20 +18,23 @@ import (
 )
 
 type UseCase struct {
-	log  appPorts.Logger
-	cs   ports.CacheStore
-	repo ports.Repository
+	log   appPorts.Logger
+	cache ports.CacheStore
+	cw    ports.CacheWriter
+	repo  ports.Repository
 }
 
 func NewUseCase(
 	log appPorts.Logger,
-	cs ports.CacheStore,
+	cache ports.CacheStore,
+	cw ports.CacheWriter,
 	repo ports.Repository,
 ) *UseCase {
 	return &UseCase{
-		log:  log,
-		cs:   cs,
-		repo: repo,
+		log:   log,
+		cache: cache,
+		cw:    cw,
+		repo:  repo,
 	}
 }
 
@@ -38,17 +42,14 @@ func (uc *UseCase) Create(ctx context.Context, input input.CreateNotifyInput) (*
 	const op = "notification.UseCase.Create"
 	logFields := logger.WithFields("operation", op)
 
-	uc.log.Info("Attempting to create notification", logFields()...)
-
+	// Validation errors are shown to the client as is, without the operation prefix.
 	channel, err := vo.ParseChannel(input.Channel)
 	if err != nil {
-		uc.log.Error("Error parsing channel", logFields("error", err.Error())...)
-		return nil, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%w %q", err, input.Channel)
 	}
 
-	if err = uc.validateRecipient(input, channel); err != nil {
-		uc.log.Error("Invalid recipient data", logFields("error", err.Error())...)
-		return nil, fmt.Errorf("%s: %w", op, err)
+	if err = validateRecipient(input, channel); err != nil {
+		return nil, fmt.Errorf("%w: %w", errorx.ErrInvalidRecipient, err)
 	}
 
 	notification, err := uc.repo.Create(ctx, params.CreateNotificationParams{
@@ -60,7 +61,7 @@ func (uc *UseCase) Create(ctx context.Context, input input.CreateNotifyInput) (*
 		SmsTo:          input.SmsTo,
 		Channel:        channel,
 		Status:         vo.Pending,
-		Attempts:       vo.DefaultAttempt,
+		Attempts:       0,
 		ScheduledAt:    input.Scheduled,
 	})
 	if err != nil {
@@ -68,23 +69,18 @@ func (uc *UseCase) Create(ctx context.Context, input input.CreateNotifyInput) (*
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	go func() {
-		cacheCtx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-		defer cancel()
-
-		if err = uc.cs.Create(cacheCtx, notification); err != nil {
-			uc.log.Warn("Error saving notification to cache", logFields("error", err.Error())...)
-		}
-	}()
+	uc.cw.Enqueue(notification)
 
 	uc.log.Info("Successfully created notification", logFields(
 		"notification_id", notification.ID.String(),
+		"channel", notification.Channel.String(),
+		"scheduled_at", notification.ScheduledAt,
 	)...)
 
 	return notification, nil
 }
 
-func (uc *UseCase) validateRecipient(input input.CreateNotifyInput, channel vo.Channel) error {
+func validateRecipient(input input.CreateNotifyInput, channel vo.Channel) error {
 	switch channel {
 	case vo.Email:
 		if input.EmailTo == nil || *input.EmailTo == "" {
@@ -92,6 +88,9 @@ func (uc *UseCase) validateRecipient(input input.CreateNotifyInput, channel vo.C
 		}
 		if input.TelegramID != nil || input.SmsTo != nil {
 			return fmt.Errorf("only email should be provided for email channel")
+		}
+		if _, err := mail.ParseAddress(*input.EmailTo); err != nil {
+			return fmt.Errorf("invalid email address: %w", err)
 		}
 
 	case vo.Telegram:
@@ -117,72 +116,55 @@ func (uc *UseCase) Read(ctx context.Context, id string) (*model.Notification, er
 	const op = "notification.UseCase.Read"
 	logFields := logger.WithFields("operation", op, "notification_id", id)
 
-	notificationID, err := uc.parseUUID(op, id)
+	notificationID, err := parseID(op, id)
 	if err != nil {
 		return nil, err
 	}
 
-	notification, err := uc.cs.Read(ctx, notificationID.String())
+	notification, err := uc.cache.Get(ctx, notificationID)
 	if err != nil {
 		uc.log.Warn("Failed to read from cache", logFields("error", err.Error())...)
 	}
 	if notification != nil {
-		uc.log.Info("Successfully read notification from cache", logFields()...)
+		uc.log.Debug("Notification read from cache", logFields()...)
 		return notification, nil
 	}
 
 	notification, err = uc.repo.GetByID(ctx, notificationID)
 	if err != nil {
-		uc.log.Error("Failed to read notification", logFields("error", err.Error())...)
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	go func() {
-		cacheCtx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-		defer cancel()
+	uc.cw.Enqueue(notification)
 
-		if err = uc.cs.Create(cacheCtx, notification); err != nil {
-			uc.log.Warn("Error saving notification to cache", logFields("error", err.Error())...)
-		}
-	}()
-
-	uc.log.Info("Successfully got notification from storage", logFields()...)
+	uc.log.Debug("Notification read from storage", logFields()...)
 	return notification, nil
 }
 
-func (uc *UseCase) Delete(ctx context.Context, id string) error {
-	const op = "notification.UseCase.Delete"
+func (uc *UseCase) Cancel(ctx context.Context, id string) (*model.Notification, error) {
+	const op = "notification.UseCase.Cancel"
 	logFields := logger.WithFields("operation", op, "notification_id", id)
 
-	notificationID, err := uc.parseUUID(op, id)
+	notificationID, err := parseID(op, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if _, err = uc.repo.Cancel(ctx, notificationID); err != nil {
-		uc.log.Error("Failed to cancel notification", logFields("error", err.Error())...)
-		return fmt.Errorf("%s: %w", op, err)
+	notification, err := uc.repo.Cancel(ctx, notificationID)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	go func() {
-		cacheCtx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-		defer cancel()
-
-		if err = uc.cs.Delete(cacheCtx, notificationID.String()); err != nil {
-			uc.log.Warn("Error deleting notification from cache", logFields("error", err.Error())...)
-		}
-	}()
+	uc.cw.Enqueue(notification)
 
 	uc.log.Info("Successfully canceled notification", logFields()...)
-
-	return nil
+	return notification, nil
 }
 
-func (uc *UseCase) parseUUID(op, id string) (uuid.UUID, error) {
+func parseID(op, id string) (uuid.UUID, error) {
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		uc.log.Error("Error parsing UUID", "op", op, "id", id)
-		return uid, fmt.Errorf("%s: error parsing UUID: %w", op, err)
+		return uuid.Nil, fmt.Errorf("%s: %w: %w", op, errorx.ErrInvalidID, err)
 	}
 	return uid, nil
 }

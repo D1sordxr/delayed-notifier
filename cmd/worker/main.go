@@ -4,89 +4,139 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"time"
+	"syscall"
 
-	"github.com/D1sordxr/delayed-notifier/internal/infra/logger"
-	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres"
-
-	loadApp "github.com/D1sordxr/delayed-notifier/internal/infra/app"
+	"github.com/D1sordxr/delayed-notifier/internal/application/notification/dispatcher"
+	"github.com/D1sordxr/delayed-notifier/internal/application/notification/scheduler"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/vo"
+	broker "github.com/D1sordxr/delayed-notifier/internal/infra/broker/rabbitmq/notification"
+	notificationCache "github.com/D1sordxr/delayed-notifier/internal/infra/cache/redis/notification"
 	"github.com/D1sordxr/delayed-notifier/internal/infra/config"
-	"github.com/D1sordxr/delayed-notifier/internal/infra/worker"
-
-	rabbitAdapter "github.com/D1sordxr/delayed-notifier/internal/infra/broker/rabbitmq/notification"
-	"github.com/D1sordxr/delayed-notifier/internal/infra/cache/redis/notification"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/logger"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/sender"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres"
 	notificationRepository "github.com/D1sordxr/delayed-notifier/internal/infra/storage/postgres/repositories/notification"
+	"github.com/D1sordxr/delayed-notifier/internal/infra/worker"
 	workerHandler "github.com/D1sordxr/delayed-notifier/internal/transport/rabbitmq/notification/handler"
 
-	"github.com/rs/zerolog"
-	"github.com/wb-go/wbf/dbpg"
-	"github.com/wb-go/wbf/rabbitmq"
-	"github.com/wb-go/wbf/redis"
-	"github.com/wb-go/wbf/zlog"
+	"github.com/D1sordxr/packages/app"
+	"github.com/D1sordxr/packages/cron"
+	pgPool "github.com/D1sordxr/packages/postgres"
+	exec "github.com/D1sordxr/packages/postgres/executor"
+	"github.com/D1sordxr/packages/postgres/tx"
+	"github.com/D1sordxr/packages/rabbitmq"
+	"github.com/D1sordxr/packages/redis"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	cfg := config.NewWorkerConfig()
+	log := logger.New(cfg.LogLevel)
 
-	log := logger.New(defaultLogger)
-	log.Debug("Config data", "config", cfg)
-
-	storageConn, err := dbpg.New(cfg.Storage.ConnectionString(), nil, nil)
+	pool, err := pgPool.NewPool(ctx, &cfg.Storage.Config)
 	if err != nil {
 		log.Error("Failed to connect to database", "error", err.Error())
-		return
+		return err
 	}
-	defer func() { _ = storageConn.Master.Close() }()
-	if err = postgres.SetupStorage(storageConn.Master, cfg.Storage); err != nil {
-		log.Error("Failed to setup storage", "error", err.Error())
-		return
+	poolComponent := pgPool.NewPoolComponent(pool, log, 0)
+	defer func() { _ = poolComponent.Shutdown(context.Background()) }()
+
+	if cfg.Storage.Migrations {
+		if err = postgres.Migrate(ctx, pool); err != nil {
+			log.Error("Failed to apply migrations", "error", err.Error())
+			return err
+		}
 	}
-	notificationRepo := notificationRepository.NewRepository(log, storageConn)
+	executor := exec.NewExecutor(pool)
+	txManager := tx.NewManager(executor)
+	notificationRepo := notificationRepository.NewRepository(executor)
 
-	cacheConn := redis.New(cfg.Cache.ClientAddress, cfg.Cache.Password, 1)
-	defer func() { _ = cacheConn.Close() }()
-	notificationCacheAdapter := notification.NewAdapter(cacheConn)
-
-	brokerConn, err := rabbitmq.Connect(cfg.Broker.GetConnectionString(), 3, time.Second*3)
+	cacheClient, err := redis.NewClient(ctx, &cfg.Cache.Config)
 	if err != nil {
-		log.Error("Broker connection failure", "error", err.Error())
+		log.Error("Failed to connect to cache", "error", err.Error())
+		return err
 	}
-	defer func() { _ = brokerConn.Close() }()
+	cacheComponent := redis.NewClientComponent(cacheClient, log, 0)
+	defer func() { _ = cacheComponent.Shutdown(context.Background()) }()
 
-	notificationQueue, err := rabbitAdapter.NewQueue(log, brokerConn, cfg.Broker.DeclareExchange)
-	if err != nil {
-		log.Error("RabbitMQ queue failure", "error", err.Error())
-		return
-	}
-	notificationProducer := rabbitAdapter.NewProducer(notificationQueue)
-	notificationConsumer := rabbitAdapter.NewConsumer(log, notificationQueue)
-
-	notificationWriter := workerHandler.NewNotificationWriter(
+	cacheWriter := notificationCache.NewWriter(
 		log,
+		notificationCache.NewStore(cacheClient, cfg.Cache.TTL),
+		cfg.Cache.WriteBuffer,
+		cfg.Cache.WriteWorkers,
+	)
+
+	brokerConn, err := rabbitmq.Dial(ctx, &cfg.Broker)
+	if err != nil {
+		log.Error("Failed to connect to broker", "error", err.Error())
+		return err
+	}
+	brokerComponent := rabbitmq.NewConnectionComponent(brokerConn)
+	defer func() { _ = brokerComponent.Shutdown(context.Background()) }()
+
+	if err = broker.Topology(cfg.Dispatcher.RetryDelay).Declare(brokerConn); err != nil {
+		log.Error("Failed to declare broker topology", "error", err.Error())
+		return err
+	}
+	rawPublisher, err := rabbitmq.NewPublisher(brokerConn)
+	if err != nil {
+		log.Error("Failed to open broker publisher", "error", err.Error())
+		return err
+	}
+	publisher := broker.NewPublisher(rawPublisher)
+
+	schedulerUC := scheduler.NewUseCase(log, txManager, notificationRepo, publisher, scheduler.Config{
+		BatchSize:  cfg.Scheduler.BatchSize,
+		Lookahead:  cfg.Scheduler.Lookahead,
+		StaleAfter: cfg.Scheduler.StaleAfter,
+	})
+
+	logSender := sender.NewLog(log)
+	dispatcherUC := dispatcher.NewUseCase(
+		log,
+		txManager,
 		notificationRepo,
-		notificationProducer,
-		notificationCacheAdapter,
+		publisher,
+		sender.Router{
+			vo.Email:    logSender,
+			vo.Telegram: logSender,
+			vo.SMS:      logSender,
+		},
+		cacheWriter,
+		cfg.Dispatcher.MaxAttempts,
 	)
-	notificationProcessor := workerHandler.NewProcessor(log, notificationConsumer)
-	notificationWorker := worker.NewWorker(
+
+	dispatchConsumer := rabbitmq.NewConsumer(
+		brokerConn,
+		rabbitmq.ConsumerConfig{
+			Queue:    broker.NotificationsQueue,
+			Prefetch: cfg.Dispatcher.Prefetch,
+		},
+		workerHandler.NewDispatchHandler(dispatcherUC),
 		log,
-		notificationProcessor,
-		notificationWriter,
 	)
 
-	app := loadApp.NewApp(
-		log,
-		notificationWorker,
+	schedulerWorker := cron.NewWorker(
+		worker.NewScheduler(log, schedulerUC, cfg.Scheduler.Interval, int(cfg.Scheduler.BatchSize)),
 	)
-	app.Run(ctx)
-}
 
-var defaultLogger zerolog.Logger
-
-func init() {
-	zlog.Init()
-	defaultLogger = zlog.Logger
+	// Components stop in reverse order: the scheduler stops claiming first,
+	// the dispatcher finishes in-flight deliveries, the cache writer flushes,
+	// and the connections are closed last.
+	return app.New(log,
+		poolComponent,
+		cacheComponent,
+		brokerComponent,
+		cacheWriter,
+		dispatchConsumer,
+		schedulerWorker,
+	).Run(ctx)
 }

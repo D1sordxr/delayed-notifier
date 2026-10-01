@@ -3,87 +3,83 @@ package notification
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
-	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/vo"
 
-	"github.com/wb-go/wbf/redis"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
-type Adapter struct {
-	client *redis.Client
+const (
+	keyPrefix    = "notification:"
+	fieldData    = "data"
+	fieldVersion = "version"
+)
+
+// setIfNewer stores the notification only if the cached version is not newer.
+// Writes arrive asynchronously from several services, so a stale state read
+// before an update could otherwise overwrite the fresh one.
+// Versions are updated_at in microseconds: they fit a Lua number exactly.
+var setIfNewer = redis.NewScript(`
+local current = redis.call('HGET', KEYS[1], 'version')
+if current and tonumber(current) > tonumber(ARGV[1]) then
+	return 0
+end
+redis.call('HSET', KEYS[1], 'version', ARGV[1], 'data', ARGV[2])
+redis.call('PEXPIRE', KEYS[1], ARGV[3])
+return 1
+`)
+
+type Store struct {
+	client redis.Cmdable
+	ttl    time.Duration
 }
 
-func NewAdapter(client *redis.Client) *Adapter {
-	return &Adapter{client: client}
+func NewStore(client redis.Cmdable, ttl time.Duration) *Store {
+	return &Store{client: client, ttl: ttl}
 }
 
-func (s *Adapter) Create(ctx context.Context, notification *model.Notification) error {
-	const op = "redis.notification.Adapter.Create"
+func key(id uuid.UUID) string {
+	return keyPrefix + id.String()
+}
 
-	data, err := json.Marshal(&notification)
-	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (*model.Notification, error) {
+	const op = "redis.notification.Store.Get"
+
+	data, err := s.client.HGet(ctx, key(id), fieldData).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
 	}
-	if err = s.client.Set(
-		ctx,
-		vo.WithStorageKeyPrefix(notification.ID.String()),
-		data,
-	); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	return nil
-}
-
-func (s *Adapter) Read(ctx context.Context, id string) (*model.Notification, error) {
-	const op = "redis.notification.Adapter.Read"
-
-	result, err := s.client.Get(ctx, vo.WithStorageKeyPrefix(id))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	var notification model.Notification
-	if err = json.Unmarshal([]byte(result), &notification); err != nil {
+	if err = json.Unmarshal(data, &notification); err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	return &notification, nil
 }
 
-func (s *Adapter) Delete(ctx context.Context, id string) error {
-	const op = "redis.notification.Adapter.Delete"
+func (s *Store) Set(ctx context.Context, n *model.Notification) error {
+	const op = "redis.notification.Store.Set"
 
-	if err := s.client.Del(ctx, vo.WithStorageKeyPrefix(id)).Err(); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	return nil
-}
-
-func (s *Adapter) SetDeleted(ctx context.Context, id string) error {
-	const op = "redis.notification.Adapter.SetDeleted"
-
-	if err := s.client.Set(ctx, vo.WithStorageKeyPrefixDeleted(id), vo.DeletedValue); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	_ = s.client.Del(ctx, vo.WithStorageKeyPrefix(id))
-	return nil
-}
-
-func (s *Adapter) IsDeleted(ctx context.Context, id string) (bool, error) {
-	const op = "redis.notification.Adapter.IsDeleted"
-
-	result, err := s.client.Get(ctx, vo.WithStorageKeyPrefixDeleted(id))
+	data, err := json.Marshal(n)
 	if err != nil {
-		return false, fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	if result == vo.DeletedValue {
-		return true, nil
+	err = setIfNewer.Run(ctx, s.client,
+		[]string{key(n.ID)},
+		n.UpdatedAt.UnixMicro(), data, s.ttl.Milliseconds(),
+	).Err()
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
 	}
-	return false, nil
+
+	return nil
 }

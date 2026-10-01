@@ -1,6 +1,5 @@
 -- name: CreateNotification :one
--- Запрос создает новое уведомление в базе данных;
--- Возвращает созданную запись целиком
+-- Создает новое уведомление; возвращает созданную запись целиком
 INSERT INTO notifications (
     subject,           -- Тема уведомления
     message,           -- Текст сообщения
@@ -16,52 +15,77 @@ INSERT INTO notifications (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10
 )
-    RETURNING *;
+RETURNING *;
 
 -- name: GetNotificationByID :one
--- Запрос получает одно уведомление по его UUID;
--- Используется для проверки статуса или деталей уведомления
+-- Получает одно уведомление по его UUID
 SELECT * FROM notifications
 WHERE id = $1;
 
--- name: UpdateNotificationStatus :one
--- Запрос обновляет статус, счетчик попыток и время отправки уведомления;
--- Используется воркером после попытки отправки
-UPDATE notifications
-SET
-    status = $2,    -- Новый статус: sent, failed, etc.
-    attempts = $3,  -- Увеличиваем счетчик попыток
-    sent_at = $4    -- Время фактической отправки (если успешно)
-WHERE
-    id = $1
-    RETURNING *;
-
 -- name: CancelNotification :one
--- Запрос выполняет "мягкое удаление" путем изменения статуса на 'declined'
--- Мы никогда не удаляем данные полностью, только меняем их состояние
--- Это обеспечивает аудит и историчность данных
+-- "Мягкое удаление": отменить можно только еще не отправленное уведомление.
+-- Если уведомление прямо сейчас отправляется, запрос дождется конца отправки
+-- и не найдет строку, так как статус уже не 'pending'
 UPDATE notifications
 SET
-    status = 'declined'  -- Меняем статус на отмененный
-WHERE
-    id = $1
-    RETURNING *;
+    status = 'declined',
+    updated_at = clock_timestamp()
+WHERE id = $1
+    AND status = 'pending'
+RETURNING *;
 
--- name: GetPendingNotificationsForUpdate :many
--- Блокирует строки для обновления в транзакции
+-- name: ClaimDueNotifications :many
+-- Забирает пачку уведомлений, время отправки которых наступает до due_before,
+-- и которые еще не переданы в брокер (или переданы давно и застряли).
+-- SKIP LOCKED позволяет нескольким воркерам работать параллельно без дублей
 SELECT * FROM notifications
 WHERE status = 'pending'
-    AND scheduled_at <= NOW()  -- Только уведомления, время отправки которых наступило
-ORDER BY scheduled_at ASC
-FOR UPDATE SKIP LOCKED
-LIMIT $1;
+    AND scheduled_at <= @due_before
+    AND (queued_at IS NULL OR queued_at < @stale_before::timestamptz)
+ORDER BY scheduled_at
+LIMIT @batch_size
+FOR UPDATE SKIP LOCKED;
 
--- name: SetNotificationStatusSentMany :exec
+-- name: MarkNotificationsQueued :exec
+-- Отмечает уведомления как переданные в брокер.
+-- updated_at не меняется: видимое состояние уведомления осталось прежним
 UPDATE notifications
-SET status = 'sent'
+SET queued_at = clock_timestamp()
 WHERE id = ANY(@ids::uuid[]);
 
--- name: SetNotificationStatusFailedMany :exec
+-- name: LockPendingNotification :one
+-- Блокирует уведомление на время отправки. Если строку уже отправляет другой
+-- обработчик, запрос ждет его и затем не находит строку (статус сменился)
+SELECT * FROM notifications
+WHERE id = $1
+    AND status = 'pending'
+FOR UPDATE;
+
+-- name: MarkNotificationSent :one
 UPDATE notifications
-SET status = 'failed'
-WHERE id = ANY(@ids::uuid[]);
+SET
+    status = 'sent',
+    attempts = attempts + 1,
+    sent_at = clock_timestamp(),
+    updated_at = clock_timestamp()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkNotificationFailed :one
+UPDATE notifications
+SET
+    status = 'failed',
+    attempts = attempts + 1,
+    updated_at = clock_timestamp()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkNotificationRetry :one
+-- Неудачная попытка, после которой будет повтор через retry-очередь
+UPDATE notifications
+SET
+    attempts = attempts + 1,
+    queued_at = clock_timestamp(),
+    updated_at = clock_timestamp()
+WHERE id = $1
+RETURNING *;

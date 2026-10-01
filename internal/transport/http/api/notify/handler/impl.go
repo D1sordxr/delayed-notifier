@@ -2,20 +2,32 @@ package handler
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"strings"
 
 	"github.com/D1sordxr/delayed-notifier/internal/application/notification/input"
 	"github.com/D1sordxr/delayed-notifier/internal/application/notification/port"
+	appPorts "github.com/D1sordxr/delayed-notifier/internal/domain/app/ports"
+	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/errorx"
 	"github.com/D1sordxr/delayed-notifier/internal/domain/core/notification/model"
-	"github.com/D1sordxr/delayed-notifier/pkg/xstrings"
 )
 
+const internalError = "Internal server error"
+
 type Handlers struct {
-	uc port.NotifyUseCase
+	log appPorts.Logger
+	uc  port.NotifyUseCase
 }
 
-func NewHandlers(uc port.NotifyUseCase) *Handlers {
-	return &Handlers{uc: uc}
+func NewHandlers(log appPorts.Logger, uc port.NotifyUseCase) *Handlers {
+	return &Handlers{log: log, uc: uc}
+}
+
+func (h Handlers) GetHealth(
+	context.Context,
+	GetHealthRequestObject,
+) (GetHealthResponseObject, error) {
+	return GetHealth200JSONResponse{Status: "ok"}, nil
 }
 
 func (h Handlers) PostNotify(
@@ -28,81 +40,77 @@ func (h Handlers) PostNotify(
 		}, nil
 	}
 
-	strChannel := string(request.Body.Channel)
-	if xstrings.IsEqual(
-		"",
-		request.Body.Message,
-		request.Body.Subject,
-		strChannel,
-	) || request.Body.ScheduledAt.IsZero() {
+	body := request.Body
+	if strings.TrimSpace(body.AuthorId) == "" ||
+		strings.TrimSpace(body.Subject) == "" ||
+		strings.TrimSpace(body.Message) == "" ||
+		body.Channel == "" ||
+		body.ScheduledAt.IsZero() {
 		return PostNotify400JSONResponse{
-			Error: "user_id, subject, message, channel and scheduled_at are required fields",
+			Error: "author_id, subject, message, channel and scheduled_at are required fields",
 		}, nil
 	}
 
 	notification, err := h.uc.Create(ctx, input.CreateNotifyInput{
-		AuthorID:   request.Body.AuthorId,
-		Subject:    request.Body.Subject,
-		Message:    request.Body.Message,
-		Channel:    strChannel,
-		EmailTo:    request.Body.EmailTo,
-		TelegramID: request.Body.TelegramId,
-		SmsTo:      request.Body.SmsTo,
-		Scheduled:  request.Body.ScheduledAt,
+		AuthorID:   body.AuthorId,
+		Subject:    body.Subject,
+		Message:    body.Message,
+		Channel:    string(body.Channel),
+		EmailTo:    body.EmailTo,
+		TelegramID: body.TelegramId,
+		SmsTo:      body.SmsTo,
+		Scheduled:  body.ScheduledAt,
 	})
-	if err != nil {
-		return PostNotify500JSONResponse{
-			Error: "Failed to create notification: " + err.Error(),
-		}, nil
+	switch {
+	case err == nil:
+		return PostNotify201JSONResponse(toResponse(notification)), nil
+	case errors.Is(err, errorx.ErrInvalidChannel), errors.Is(err, errorx.ErrInvalidRecipient):
+		return PostNotify400JSONResponse{Error: err.Error()}, nil
+	default:
+		h.log.Error("Failed to create notification", "error", err.Error())
+		return PostNotify500JSONResponse{Error: internalError}, nil
 	}
-
-	response := h.parseNotificationResponse(notification)
-	return PostNotify201JSONResponse(response), nil
-}
-
-func (h Handlers) DeleteNotifyId(
-	ctx context.Context,
-	request DeleteNotifyIdRequestObject,
-) (DeleteNotifyIdResponseObject, error) {
-	if request.Id == "" {
-		return DeleteNotifyId404JSONResponse{
-			Error: "ID is required",
-		}, nil
-	}
-
-	if err := h.uc.Delete(ctx, request.Id); err != nil {
-		return DeleteNotifyId500JSONResponse{
-			Error: fmt.Sprintf("Failed to delete notification: %s", err.Error()),
-		}, nil
-	}
-
-	return DeleteNotifyId200JSONResponse{
-		Result: "Notification cancelled successfully",
-	}, nil
 }
 
 func (h Handlers) GetNotifyId(
 	ctx context.Context,
 	request GetNotifyIdRequestObject,
 ) (GetNotifyIdResponseObject, error) {
-	if request.Id == "" {
-		return GetNotifyId404JSONResponse{
-			Error: "Notification ID is required",
-		}, nil
-	}
-
 	notification, err := h.uc.Read(ctx, request.Id)
-	if err != nil {
-		return GetNotifyId404JSONResponse{
-			Error: "Notification not found: " + err.Error(),
-		}, nil
+	switch {
+	case err == nil:
+		return GetNotifyId200JSONResponse(toResponse(notification)), nil
+	case errors.Is(err, errorx.ErrInvalidID):
+		return GetNotifyId400JSONResponse{Error: errorx.ErrInvalidID.Error()}, nil
+	case errors.Is(err, errorx.ErrNotFound):
+		return GetNotifyId404JSONResponse{Error: errorx.ErrNotFound.Error()}, nil
+	default:
+		h.log.Error("Failed to read notification", "notification_id", request.Id, "error", err.Error())
+		return GetNotifyId500JSONResponse{Error: internalError}, nil
 	}
-
-	response := h.parseNotificationResponse(notification)
-	return GetNotifyId200JSONResponse(response), nil
 }
 
-func (h Handlers) parseNotificationResponse(notification *model.Notification) NotificationResponse {
+func (h Handlers) DeleteNotifyId(
+	ctx context.Context,
+	request DeleteNotifyIdRequestObject,
+) (DeleteNotifyIdResponseObject, error) {
+	_, err := h.uc.Cancel(ctx, request.Id)
+	switch {
+	case err == nil:
+		return DeleteNotifyId200JSONResponse{Result: "Notification cancelled successfully"}, nil
+	case errors.Is(err, errorx.ErrInvalidID):
+		return DeleteNotifyId400JSONResponse{Error: errorx.ErrInvalidID.Error()}, nil
+	case errors.Is(err, errorx.ErrNotFound):
+		return DeleteNotifyId404JSONResponse{Error: errorx.ErrNotFound.Error()}, nil
+	case errors.Is(err, errorx.ErrNotCancellable):
+		return DeleteNotifyId409JSONResponse{Error: errorx.ErrNotCancellable.Error()}, nil
+	default:
+		h.log.Error("Failed to cancel notification", "notification_id", request.Id, "error", err.Error())
+		return DeleteNotifyId500JSONResponse{Error: internalError}, nil
+	}
+}
+
+func toResponse(notification *model.Notification) NotificationResponse {
 	id := notification.ID.String()
 	channel := NotificationResponseChannel(notification.Channel.String())
 	status := NotificationResponseStatus(notification.Status.String())

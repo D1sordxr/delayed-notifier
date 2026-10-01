@@ -11,23 +11,28 @@ import (
 )
 
 type Querier interface {
-	// Запрос выполняет "мягкое удаление" путем изменения статуса на 'declined'
-	// Мы никогда не удаляем данные полностью, только меняем их состояние
-	// Это обеспечивает аудит и историчность данных
+	// "Мягкое удаление": отменить можно только еще не отправленное уведомление.
+	// Если уведомление прямо сейчас отправляется, запрос дождется конца отправки
+	// и не найдет строку, так как статус уже не 'pending'
 	CancelNotification(ctx context.Context, id uuid.UUID) (Notification, error)
-	// Запрос создает новое уведомление в базе данных;
-	// Возвращает созданную запись целиком
+	// Забирает пачку уведомлений, время отправки которых наступает до due_before,
+	// и которые еще не переданы в брокер (или переданы давно и застряли).
+	// SKIP LOCKED позволяет нескольким воркерам работать параллельно без дублей
+	ClaimDueNotifications(ctx context.Context, arg ClaimDueNotificationsParams) ([]Notification, error)
+	// Создает новое уведомление; возвращает созданную запись целиком
 	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
-	// Запрос получает одно уведомление по его UUID;
-	// Используется для проверки статуса или деталей уведомления
+	// Получает одно уведомление по его UUID
 	GetNotificationByID(ctx context.Context, id uuid.UUID) (Notification, error)
-	// Блокирует строки для обновления в транзакции
-	GetPendingNotificationsForUpdate(ctx context.Context, limit int32) ([]Notification, error)
-	SetNotificationStatusFailedMany(ctx context.Context, ids []uuid.UUID) error
-	SetNotificationStatusSentMany(ctx context.Context, ids []uuid.UUID) error
-	// Запрос обновляет статус, счетчик попыток и время отправки уведомления;
-	// Используется воркером после попытки отправки
-	UpdateNotificationStatus(ctx context.Context, arg UpdateNotificationStatusParams) (Notification, error)
+	// Блокирует уведомление на время отправки. Если строку уже отправляет другой
+	// обработчик, запрос ждет его и затем не находит строку (статус сменился)
+	LockPendingNotification(ctx context.Context, id uuid.UUID) (Notification, error)
+	MarkNotificationFailed(ctx context.Context, id uuid.UUID) (Notification, error)
+	// Неудачная попытка, после которой будет повтор через retry-очередь
+	MarkNotificationRetry(ctx context.Context, id uuid.UUID) (Notification, error)
+	MarkNotificationSent(ctx context.Context, id uuid.UUID) (Notification, error)
+	// Отмечает уведомления как переданные в брокер.
+	// updated_at не меняется: видимое состояние уведомления осталось прежним
+	MarkNotificationsQueued(ctx context.Context, ids []uuid.UUID) error
 }
 
 var _ Querier = (*Queries)(nil)

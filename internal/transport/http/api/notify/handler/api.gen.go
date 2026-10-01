@@ -76,6 +76,11 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// HealthResponse defines model for HealthResponse.
+type HealthResponse struct {
+	Status string `json:"status"`
+}
+
 // NotificationResponse defines model for NotificationResponse.
 type NotificationResponse struct {
 	// Attempts Number of delivery attempts
@@ -141,6 +146,9 @@ type PostNotifyJSONRequestBody = CreateNotificationRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Health check
+	// (GET /health)
+	GetHealth(c *gin.Context)
 	// Create new notification
 	// (POST /notify)
 	PostNotify(c *gin.Context)
@@ -160,6 +168,19 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(c *gin.Context)
+
+// GetHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetHealth(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetHealth(c)
+}
 
 // PostNotify operation middleware
 func (siw *ServerInterfaceWrapper) PostNotify(c *gin.Context) {
@@ -249,9 +270,26 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 		ErrorHandler:       errorHandler,
 	}
 
+	router.GET(options.BaseURL+"/health", wrapper.GetHealth)
 	router.POST(options.BaseURL+"/notify", wrapper.PostNotify)
 	router.DELETE(options.BaseURL+"/notify/:id", wrapper.DeleteNotifyId)
 	router.GET(options.BaseURL+"/notify/:id", wrapper.GetNotifyId)
+}
+
+type GetHealthRequestObject struct {
+}
+
+type GetHealthResponseObject interface {
+	VisitGetHealthResponse(w http.ResponseWriter) error
+}
+
+type GetHealth200JSONResponse HealthResponse
+
+func (response GetHealth200JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type PostNotifyRequestObject struct {
@@ -306,11 +344,29 @@ func (response DeleteNotifyId200JSONResponse) VisitDeleteNotifyIdResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type DeleteNotifyId400JSONResponse ErrorResponse
+
+func (response DeleteNotifyId400JSONResponse) VisitDeleteNotifyIdResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type DeleteNotifyId404JSONResponse ErrorResponse
 
 func (response DeleteNotifyId404JSONResponse) VisitDeleteNotifyIdResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteNotifyId409JSONResponse ErrorResponse
+
+func (response DeleteNotifyId409JSONResponse) VisitDeleteNotifyIdResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -341,6 +397,15 @@ func (response GetNotifyId200JSONResponse) VisitGetNotifyIdResponse(w http.Respo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetNotifyId400JSONResponse ErrorResponse
+
+func (response GetNotifyId400JSONResponse) VisitGetNotifyIdResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetNotifyId404JSONResponse ErrorResponse
 
 func (response GetNotifyId404JSONResponse) VisitGetNotifyIdResponse(w http.ResponseWriter) error {
@@ -361,6 +426,9 @@ func (response GetNotifyId500JSONResponse) VisitGetNotifyIdResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Health check
+	// (GET /health)
+	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
 	// Create new notification
 	// (POST /notify)
 	PostNotify(ctx context.Context, request PostNotifyRequestObject) (PostNotifyResponseObject, error)
@@ -382,6 +450,31 @@ func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareF
 type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
+}
+
+// GetHealth operation middleware
+func (sh *strictHandler) GetHealth(ctx *gin.Context) {
+	var request GetHealthRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHealth(ctx, request.(GetHealthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHealth")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
+		if err := validResponse.VisitGetHealthResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // PostNotify operation middleware
